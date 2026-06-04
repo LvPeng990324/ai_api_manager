@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Token Proxy 管理后台</title>
+    <link rel="stylesheet" href="/admin/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AI Token Proxy</h1>
+            <nav>
+                <button class="nav-btn active" data-tab="dashboard">统计看板</button>
+                <button class="nav-btn" data-tab="keys">密钥管理</button>
+                <button class="nav-btn" data-tab="mappings">映射关系</button>
+                <button class="nav-btn" data-tab="logs">请求日志</button>
+            </nav>
+        </header>
+
+        <main>
+            <!-- 统计看板 -->
+            <section id="tab-dashboard" class="tab active">
+                <h2>统计看板</h2>
+                <div class="cards">
+                    <div class="card">
+                        <div class="card-title">今日请求</div>
+                        <div class="card-value" id="today-requests">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">今日 Input Tokens</div>
+                        <div class="card-value" id="today-input">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">今日 Output Tokens</div>
+                        <div class="card-value" id="today-output">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">近7日请求</div>
+                        <div class="card-value" id="week-requests">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">近7日 Input Tokens</div>
+                        <div class="card-value" id="week-input">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">近7日 Output Tokens</div>
+                        <div class="card-value" id="week-output">-</div>
+                    </div>
+                </div>
+                <h3>Top 假密钥 (近7日)</h3>
+                <table>
+                    <thead>
+                        <tr><th>ID</th><th>名称</th><th>密钥</th><th>请求量</th></tr>
+                    </thead>
+                    <tbody id="top-keys"></tbody>
+                </table>
+            </section>
+
+            <!-- 密钥管理 -->
+            <section id="tab-keys" class="tab">
+                <div class="sub-tabs">
+                    <button class="sub-tab-btn active" data-sub="fake">假密钥</button>
+                    <button class="sub-tab-btn" data-sub="real">真密钥</button>
+                </div>
+
+                <div id="sub-fake" class="sub-tab active">
+                    <div class="toolbar">
+                        <button class="btn btn-primary" onclick="showModal('fake')">+ 新建假密钥</button>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr><th>ID</th><th>密钥</th><th>名称</th><th>启用</th><th>创建时间</th><th>操作</th></tr>
+                        </thead>
+                        <tbody id="fake-keys-list"></tbody>
+                    </table>
+                </div>
+
+                <div id="sub-real" class="sub-tab">
+                    <div class="toolbar">
+                        <button class="btn btn-primary" onclick="showModal('real')">+ 新建真密钥</button>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr><th>ID</th><th>厂商</th><th>名称</th><th>启用</th><th>创建时间</th><th>操作</th></tr>
+                        </thead>
+                        <tbody id="real-keys-list"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 映射关系 -->
+            <section id="tab-mappings" class="tab">
+                <div class="toolbar">
+                    <button class="btn btn-primary" onclick="showModal('mapping')">+ 新建映射</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr><th>ID</th><th>假密钥</th><th>真密钥</th><th>厂商</th><th>优先级</th><th>操作</th></tr>
+                    </thead>
+                    <tbody id="mappings-list"></tbody>
+                </table>
+            </section>
+
+            <!-- 请求日志 -->
+            <section id="tab-logs" class="tab">
+                <div class="toolbar">
+                    <select id="log-filter-key">
+                        <option value="">全部假密钥</option>
+                    </select>
+                    <select id="log-filter-provider">
+                        <option value="">全部厂商</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="siliconflow">SiliconFlow</option>
+                        <option value="moonshot">Moonshot</option>
+                    </select>
+                    <button class="btn" onclick="loadLogs()">查询</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th><th>假密钥</th><th>厂商</th><th>模型</th><th>状态</th>
+                            <th>耗时(ms)</th><th>Input</th><th>Output</th><th>时间</th><th>预览</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-list"></tbody>
+                </table>
+                <div class="pagination">
+                    <button class="btn" onclick="changePage(-1)">上一页</button>
+                    <span id="page-info">第 1 页</span>
+                    <button class="btn" onclick="changePage(1)">下一页</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h3 id="modal-title">新建</h3>
+            <div id="modal-body"></div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="submitModal()">保存</button>
+                <button class="btn" onclick="closeModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Detail Modal -->
+    <div id="detail-modal" class="modal">
+        <div class="modal-content detail-modal-content">
+            <span class="close" onclick="closeDetailModal()">&times;</span>
+            <h3>请求详情</h3>
+            <div id="detail-modal-body"></div>
+        </div>
+    </div>
+
+    <script src="/admin/static/app.js"></script>
+</body>
+</html>
