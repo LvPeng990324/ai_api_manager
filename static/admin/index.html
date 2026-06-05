@@ -7,15 +7,41 @@
     <link rel="stylesheet" href="/admin/static/style.css">
 </head>
 <body>
-    <div class="container">
+    <!-- 登录页 -->
+    <div id="login-page" class="login-page">
+        <div class="login-card">
+            <h2>AI Token Proxy</h2>
+            <p id="login-subtitle">管理员登录</p>
+            <div class="form-group">
+                <label>用户名</label>
+                <input id="login-username" placeholder="请输入用户名">
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <input id="login-password" type="password" placeholder="请输入密码">
+            </div>
+            <div id="login-error" class="login-error"></div>
+            <button class="btn btn-primary btn-block" id="login-btn" onclick="handleLogin()">登录</button>
+        </div>
+    </div>
+
+    <!-- 管理后台 -->
+    <div id="app-page" class="container" style="display:none;">
         <header>
-            <h1>AI Token Proxy</h1>
-            <nav>
-                <button class="nav-btn active" data-tab="dashboard">统计看板</button>
-                <button class="nav-btn" data-tab="keys">密钥管理</button>
-                <button class="nav-btn" data-tab="mappings">映射关系</button>
-                <button class="nav-btn" data-tab="logs">请求日志</button>
-            </nav>
+            <div class="header-left">
+                <h1>AI Token Proxy</h1>
+                <nav>
+                    <button class="nav-btn active" data-tab="dashboard">统计看板</button>
+                    <button class="nav-btn" data-tab="keys">密钥管理</button>
+                    <button class="nav-btn" data-tab="mappings">映射关系</button>
+                    <button class="nav-btn" data-tab="logs">请求日志</button>
+                    <button class="nav-btn" id="nav-users" style="display:none;" data-tab="users">用户管理</button>
+                </nav>
+            </div>
+            <div class="header-right">
+                <span id="current-user" class="current-user"></span>
+                <button class="btn" onclick="logout()">退出登录</button>
+            </div>
         </header>
 
         <main>
@@ -131,6 +157,19 @@
                     <span id="page-info">第 1 页</span>
                     <button class="btn" onclick="changePage(1)">下一页</button>
                 </div>
+            </section>
+
+            <!-- 用户管理 -->
+            <section id="tab-users" class="tab">
+                <div class="toolbar">
+                    <button class="btn btn-primary" onclick="showModal('user')">+ 新建管理员</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr><th>ID</th><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr>
+                    </thead>
+                    <tbody id="users-list"></tbody>
+                </table>
             </section>
         </main>
     </div>

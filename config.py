@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     master_key: str
+    jwt_secret: str = ""  # 为空时默认使用 master_key
     database_url: str = "sqlite+aiosqlite:///./ai_api_manager.db"
     host: str = "0.0.0.0"
     port: int = 8000

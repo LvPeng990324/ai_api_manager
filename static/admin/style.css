@@ -6,12 +6,68 @@ body {
     line-height: 1.6;
 }
 .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+/* Login page */
+.login-page {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+.login-card {
+    background: #fff;
+    padding: 40px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.login-card h2 {
+    text-align: center;
+    margin-bottom: 4px;
+    color: #1a1a2e;
+}
+.login-card p {
+    text-align: center;
+    color: #888;
+    margin-bottom: 24px;
+    font-size: 14px;
+}
+.login-error {
+    color: #dc2626;
+    font-size: 13px;
+    margin-bottom: 12px;
+    min-height: 18px;
+}
+.btn-block {
+    width: 100%;
+    padding: 10px;
+    font-size: 15px;
+}
+
+/* Header */
 header {
     background: #fff;
     padding: 20px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.header-left { flex: 1; }
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.current-user {
+    font-size: 13px;
+    color: #555;
 }
 header h1 { font-size: 24px; margin-bottom: 12px; color: #1a1a2e; }
 nav { display: flex; gap: 8px; flex-wrap: wrap; }

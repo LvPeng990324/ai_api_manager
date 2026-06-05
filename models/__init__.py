@@ -4,5 +4,6 @@ from models.real_key import RealKey
 from models.mapping import KeyMapping
 from models.request_log import RequestLog
 from models.daily_stats import DailyStats
+from models.user import User
 
-__all__ = ["Base", "FakeKey", "RealKey", "KeyMapping", "RequestLog", "DailyStats"]
+__all__ = ["Base", "FakeKey", "RealKey", "KeyMapping", "RequestLog", "DailyStats", "User"]

@@ -2,8 +2,152 @@ const API_BASE = '/admin/api';
 let currentModalType = null;
 let logOffset = 0;
 const logLimit = 50;
+let currentUser = null;
+let currentRole = null;
 
-// ========== 导航 ==========
+// ========== Auth & Init ==========
+
+function getToken() {
+    return localStorage.getItem('admin_token') || '';
+}
+
+function setToken(token) {
+    localStorage.setItem('admin_token', token);
+}
+
+function clearToken() {
+    localStorage.removeItem('admin_token');
+}
+
+async function apiFetch(url, options = {}) {
+    const token = getToken();
+    options.headers = options.headers || {};
+    if (token) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+    }
+    options.headers['Content-Type'] = options.headers['Content-Type'] || 'application/json';
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+        clearToken();
+        showLoginPage();
+        throw new Error('Unauthorized');
+    }
+    return res;
+}
+
+function showLoginPage(isInit = false) {
+    document.getElementById('login-page').style.display = 'flex';
+    document.getElementById('app-page').style.display = 'none';
+    document.getElementById('login-subtitle').textContent = isInit ? '创建超级管理员' : '管理员登录';
+    document.getElementById('login-btn').textContent = isInit ? '创建并登录' : '登录';
+    document.getElementById('login-btn').onclick = isInit ? handleInit : handleLogin;
+}
+
+function showAppPage() {
+    document.getElementById('login-page').style.display = 'none';
+    document.getElementById('app-page').style.display = 'block';
+}
+
+async function checkAuth() {
+    const token = getToken();
+    if (!token) {
+        // 检查是否需要初始化
+        const statusRes = await fetch(`${API_BASE}/init-status`);
+        const statusData = await statusRes.json();
+        showLoginPage(statusData.need_init);
+        return;
+    }
+    try {
+        const res = await apiFetch(`${API_BASE}/me`);
+        if (!res.ok) {
+            const statusRes = await fetch(`${API_BASE}/init-status`);
+            const statusData = await statusRes.json();
+            showLoginPage(statusData.need_init);
+            return;
+        }
+        currentUser = await res.json();
+        currentRole = currentUser.role;
+        document.getElementById('current-user').textContent = `${currentUser.username} (${currentRole === 'super_admin' ? '超级管理员' : '管理员'})`;
+        if (currentRole === 'super_admin') {
+            document.getElementById('nav-users').style.display = '';
+        }
+        showAppPage();
+        loadDashboard();
+    } catch (e) {
+        const statusRes = await fetch(`${API_BASE}/init-status`);
+        const statusData = await statusRes.json();
+        showLoginPage(statusData.need_init);
+    }
+}
+
+async function handleLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errorEl = document.getElementById('login-error');
+    errorEl.textContent = '';
+    if (!username || !password) {
+        errorEl.textContent = '请输入用户名和密码';
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        if (!res.ok) {
+            const data = await res.json();
+            errorEl.textContent = data.detail || '登录失败';
+            return;
+        }
+        const data = await res.json();
+        setToken(data.access_token);
+        await checkAuth();
+    } catch (e) {
+        errorEl.textContent = '网络错误';
+    }
+}
+
+async function handleInit() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errorEl = document.getElementById('login-error');
+    errorEl.textContent = '';
+    if (!username || !password) {
+        errorEl.textContent = '请输入用户名和密码';
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/init`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        if (!res.ok) {
+            const data = await res.json();
+            errorEl.textContent = data.detail || '创建失败';
+            return;
+        }
+        // 创建成功后自动登录
+        const loginRes = await fetch(`${API_BASE}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const loginData = await loginRes.json();
+        setToken(loginData.access_token);
+        await checkAuth();
+    } catch (e) {
+        errorEl.textContent = '网络错误';
+    }
+}
+
+function logout() {
+    clearToken();
+    location.reload();
+}
+
+// ========== Navigation ==========
 document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -14,6 +158,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
         if (btn.dataset.tab === 'keys') loadKeys();
         if (btn.dataset.tab === 'mappings') loadMappings();
         if (btn.dataset.tab === 'logs') { loadFakeKeyOptions(); loadLogs(); }
+        if (btn.dataset.tab === 'users') loadUsers();
     });
 });
 
@@ -28,7 +173,7 @@ document.querySelectorAll('.sub-tab-btn').forEach(btn => {
 
 // ========== Dashboard ==========
 async function loadDashboard() {
-    const res = await fetch(`${API_BASE}/stats/dashboard`);
+    const res = await apiFetch(`${API_BASE}/stats/dashboard`);
     const data = await res.json();
     document.getElementById('today-requests').textContent = data.today_requests;
     document.getElementById('today-input').textContent = data.today_tokens_input;
@@ -51,8 +196,8 @@ async function loadDashboard() {
 // ========== Keys ==========
 async function loadKeys() {
     const [fakeRes, realRes] = await Promise.all([
-        fetch(`${API_BASE}/fake-keys`),
-        fetch(`${API_BASE}/real-keys`),
+        apiFetch(`${API_BASE}/fake-keys`),
+        apiFetch(`${API_BASE}/real-keys`),
     ]);
     const fakeKeys = await fakeRes.json();
     const realKeys = await realRes.json();
@@ -88,18 +233,18 @@ async function loadKeys() {
 
 async function deleteFakeKey(id) {
     if (!confirm('确定删除该假密钥？')) return;
-    await fetch(`${API_BASE}/fake-keys/${id}`, { method: 'DELETE' });
+    await apiFetch(`${API_BASE}/fake-keys/${id}`, { method: 'DELETE' });
     loadKeys(); loadMappings();
 }
 async function deleteRealKey(id) {
     if (!confirm('确定删除该真密钥？')) return;
-    await fetch(`${API_BASE}/real-keys/${id}`, { method: 'DELETE' });
+    await apiFetch(`${API_BASE}/real-keys/${id}`, { method: 'DELETE' });
     loadKeys(); loadMappings();
 }
 
 // ========== Mappings ==========
 async function loadMappings() {
-    const res = await fetch(`${API_BASE}/mappings`);
+    const res = await apiFetch(`${API_BASE}/mappings`);
     const mappings = await res.json();
     document.getElementById('mappings-list').innerHTML = mappings.map(m => `
         <tr>
@@ -116,13 +261,13 @@ async function loadMappings() {
 }
 async function deleteMapping(id) {
     if (!confirm('确定删除该映射？')) return;
-    await fetch(`${API_BASE}/mappings/${id}`, { method: 'DELETE' });
+    await apiFetch(`${API_BASE}/mappings/${id}`, { method: 'DELETE' });
     loadMappings();
 }
 
 // ========== Logs ==========
 async function loadFakeKeyOptions() {
-    const res = await fetch(`${API_BASE}/fake-keys`);
+    const res = await apiFetch(`${API_BASE}/fake-keys`);
     const keys = await res.json();
     const select = document.getElementById('log-filter-key');
     const current = select.value;
@@ -138,7 +283,7 @@ async function loadLogs() {
     if (keyId) params.set('fake_key_id', keyId);
     if (provider) params.set('provider', provider);
 
-    const res = await fetch(`${API_BASE}/logs?${params}`);
+    const res = await apiFetch(`${API_BASE}/logs?${params}`);
     const data = await res.json();
     const tbody = document.getElementById('logs-list');
     tbody.innerHTML = data.items.map(log => `
@@ -168,6 +313,30 @@ async function loadLogs() {
 function changePage(delta) {
     logOffset = Math.max(0, logOffset + delta * logLimit);
     loadLogs();
+}
+
+// ========== Users ==========
+async function loadUsers() {
+    const res = await apiFetch(`${API_BASE}/users`);
+    const users = await res.json();
+    document.getElementById('users-list').innerHTML = users.map(u => `
+        <tr>
+            <td>${u.id}</td>
+            <td>${u.username}</td>
+            <td>${u.role === 'super_admin' ? '超级管理员' : '管理员'}</td>
+            <td>${new Date(u.created_at).toLocaleString()}</td>
+            <td>
+                <button class="btn" onclick="editUser(${u.id}, '${u.username.replace(/'/g,'\\\'')}')">编辑</button>
+                ${u.role !== 'super_admin' ? `<button class="btn btn-danger" onclick="deleteUser(${u.id})">删除</button>` : ''}
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function deleteUser(id) {
+    if (!confirm('确定删除该管理员？')) return;
+    await apiFetch(`${API_BASE}/users/${id}`, { method: 'DELETE' });
+    loadUsers();
 }
 
 // ========== Modal ==========
@@ -202,8 +371,8 @@ function showModal(type) {
     } else if (type === 'mapping') {
         title.textContent = '新建映射';
         Promise.all([
-            fetch(`${API_BASE}/fake-keys`).then(r => r.json()),
-            fetch(`${API_BASE}/real-keys`).then(r => r.json()),
+            apiFetch(`${API_BASE}/fake-keys`).then(r => r.json()),
+            apiFetch(`${API_BASE}/real-keys`).then(r => r.json()),
         ]).then(([fakeKeys, realKeys]) => {
             body.innerHTML = `
                 <div class="form-group"><label>假密钥</label>
@@ -219,10 +388,18 @@ function showModal(type) {
                 <div class="form-group"><label>优先级</label><input id="m-map-priority" type="number" value="0"></div>
             `;
         });
+    } else if (type === 'user') {
+        title.textContent = '新建管理员';
+        body.innerHTML = `
+            <div class="form-group"><label>用户名</label><input id="m-user-name" placeholder="输入用户名"></div>
+            <div class="form-group"><label>密码</label><input id="m-user-pwd" type="password" placeholder="输入密码"></div>
+        `;
     } else if (type === 'edit-fake') {
         title.textContent = '编辑假密钥';
     } else if (type === 'edit-real') {
         title.textContent = '编辑真密钥';
+    } else if (type === 'edit-user') {
+        title.textContent = '编辑用户';
     }
 }
 
@@ -259,6 +436,18 @@ function editRealKey(id, provider, name, enabled) {
     modal.classList.add('active');
 }
 
+function editUser(id, username) {
+    currentModalType = 'edit-user';
+    currentModalType.id = id;
+    const modal = document.getElementById('modal');
+    document.getElementById('modal-title').textContent = '编辑用户';
+    document.getElementById('modal-body').innerHTML = `
+        <div class="form-group"><label>用户名 (留空则不变)</label><input id="m-user-name" value="${username}" placeholder="留空表示不修改"></div>
+        <div class="form-group"><label>密码 (留空则不变)</label><input id="m-user-pwd" type="password" placeholder="留空表示不修改"></div>
+    `;
+    modal.classList.add('active');
+}
+
 function closeModal() {
     document.getElementById('modal').classList.remove('active');
     currentModalType = null;
@@ -270,7 +459,7 @@ async function submitModal() {
     if (currentModalType === 'fake') {
         const name = document.getElementById('m-fake-name').value;
         const enabled = document.getElementById('m-fake-enabled').value === '1';
-        await fetch(`${API_BASE}/fake-keys`, {
+        await apiFetch(`${API_BASE}/fake-keys`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, enabled }),
         });
@@ -279,7 +468,7 @@ async function submitModal() {
         const key = document.getElementById('m-real-key').value;
         const name = document.getElementById('m-real-name').value;
         const enabled = document.getElementById('m-real-enabled').value === '1';
-        await fetch(`${API_BASE}/real-keys`, {
+        await apiFetch(`${API_BASE}/real-keys`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ provider, key, name, enabled }),
         });
@@ -287,14 +476,21 @@ async function submitModal() {
         const fake_key_id = parseInt(document.getElementById('m-map-fake').value);
         const real_key_id = parseInt(document.getElementById('m-map-real').value);
         const priority = parseInt(document.getElementById('m-map-priority').value || 0);
-        await fetch(`${API_BASE}/mappings`, {
+        await apiFetch(`${API_BASE}/mappings`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fake_key_id, real_key_id, priority }),
+        });
+    } else if (currentModalType === 'user') {
+        const username = document.getElementById('m-user-name').value;
+        const password = document.getElementById('m-user-pwd').value;
+        await apiFetch(`${API_BASE}/users`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
         });
     } else if (currentModalType === 'edit-fake') {
         const name = document.getElementById('m-fake-name').value;
         const enabled = document.getElementById('m-fake-enabled').value === '1';
-        await fetch(`${API_BASE}/fake-keys/${currentModalType.id}`, {
+        await apiFetch(`${API_BASE}/fake-keys/${currentModalType.id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, enabled }),
         });
@@ -305,7 +501,17 @@ async function submitModal() {
         const enabled = document.getElementById('m-real-enabled').value === '1';
         const body = { provider, name, enabled };
         if (key) body.key = key;
-        await fetch(`${API_BASE}/real-keys/${currentModalType.id}`, {
+        await apiFetch(`${API_BASE}/real-keys/${currentModalType.id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+    } else if (currentModalType === 'edit-user') {
+        const username = document.getElementById('m-user-name').value;
+        const password = document.getElementById('m-user-pwd').value;
+        const body = {};
+        if (username) body.username = username;
+        if (password) body.password = password;
+        await apiFetch(`${API_BASE}/users/${currentModalType.id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
@@ -314,6 +520,9 @@ async function submitModal() {
     closeModal();
     loadKeys();
     loadMappings();
+    if (document.getElementById('tab-users').classList.contains('active')) {
+        loadUsers();
+    }
 }
 
 // ========== Log Detail Modal ==========
@@ -351,4 +560,4 @@ function closeDetailModal() {
 }
 
 // 初始加载
-loadDashboard();
+checkAuth();
