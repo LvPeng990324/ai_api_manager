@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+from functools import lru_cache
 
 from cryptography.fernet import Fernet
 
@@ -13,6 +14,11 @@ def encrypt(text: str) -> str:
 
 
 def decrypt(token: str) -> str:
+    return _fernet.decrypt(token.encode()).decode()
+
+
+@lru_cache(maxsize=1024)
+def decrypt_cached(token: str) -> str:
     return _fernet.decrypt(token.encode()).decode()
 
 

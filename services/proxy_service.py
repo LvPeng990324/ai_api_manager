@@ -1,49 +1,94 @@
-import asyncio
 import json
 import time
 from typing import AsyncIterator, Optional
 
 import httpx
 from fastapi import Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from models import RealKey
 from services.key_service import get_real_key_decrypted
 from services.stats_service import record_request
+from utils.background import run_in_background
 from utils.db import AsyncSessionLocal
+from utils.http_client import get_http_client
+
+_MAX_PREVIEW_LEN = 10000
+
 
 def _build_target_url(real_key: RealKey, full_path: str) -> str:
-    """根据真密钥 base_url 和下游请求路径构造上游目标 URL。"""
     base_url = real_key.base_url.strip().rstrip("/")
     if not base_url:
         raise ValueError("Real key base_url is empty")
     return f"{base_url}/{full_path.lstrip('/')}"
 
 
-async def extract_request_preview(body: bytes) -> str:
-    """提取请求预览，最多100000字符"""
+def _parse_body(body: bytes) -> tuple[dict, bool]:
     try:
         data = json.loads(body)
-        preview = json.dumps(data, ensure_ascii=False)
-        return preview[:100000]
+        return data, bool(data.get("stream", False))
     except Exception:
-        return body[:100000].decode("utf-8", errors="ignore")
+        return {}, False
 
 
-def extract_model(body: bytes) -> str:
+def _extract_request_preview(data: dict, body: bytes) -> str:
+    if data:
+        try:
+            preview = json.dumps(data, ensure_ascii=False)
+            return preview[:_MAX_PREVIEW_LEN]
+        except Exception:
+            pass
+    return body[:_MAX_PREVIEW_LEN].decode("utf-8", errors="ignore")
+
+
+def _extract_model(data: dict) -> str:
+    return data.get("model", "") if isinstance(data, dict) else ""
+
+
+def _safe_json_loads(text: str | bytes) -> Optional[dict]:
     try:
-        data = json.loads(body)
-        return data.get("model", "")
+        return json.loads(text)
     except Exception:
-        return ""
+        return None
 
 
 def parse_usage_from_response(data: dict) -> tuple[int, int]:
-    """从响应中解析token使用量"""
-    usage = data.get("usage", {})
+    usage = data.get("usage", {}) or {}
     prompt = usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0)
     completion = usage.get("completion_tokens", 0) or usage.get("output_tokens", 0)
-    return int(prompt), int(completion)
+    return int(prompt or 0), int(completion or 0)
+
+
+def _record_request_background(
+    fake_key_id: int,
+    real_key_id: int,
+    provider: str,
+    model: str,
+    endpoint: str,
+    status_code: int,
+    latency_ms: int,
+    tokens_input: int,
+    tokens_output: int,
+    request_preview: str,
+) -> None:
+    async def _do() -> None:
+        if "chat/completions" not in endpoint:
+            return
+        try:
+            async with AsyncSessionLocal() as log_db:
+                await record_request(
+                    log_db, fake_key_id, real_key_id, provider, model, endpoint,
+                    status_code, latency_ms, tokens_input, tokens_output, request_preview,
+                )
+        except Exception:
+            pass
+
+    run_in_background(_do())
+
+
+def _response_headers(response: httpx.Response) -> dict[str, str]:
+    drop = {"content-length", "transfer-encoding", "content-encoding"}
+    return {k: v for k, v in response.headers.items() if k.lower() not in drop}
 
 
 async def proxy_request(
@@ -51,20 +96,19 @@ async def proxy_request(
     real_key: RealKey,
     fake_key_id: int,
     full_path: str,
-) -> StreamingResponse | JSONResponse:
-    """核心代理转发逻辑"""
+) -> StreamingResponse:
     target_url = _build_target_url(real_key, full_path)
-    provider = real_key.provider  # 仅用于日志/统计
+    provider = real_key.provider
     path = full_path
+    is_chat = "chat/completions" in path
 
     real_key_text = get_real_key_decrypted(real_key)
 
-    # 读取请求体
     body = await request.body()
-    request_preview = await extract_request_preview(body)
-    model = extract_model(body)
+    data, is_stream = _parse_body(body)
+    request_preview = _extract_request_preview(data, body) if is_chat else ""
+    model = _extract_model(data) if is_chat else ""
 
-    # 构建透传 headers
     headers = {}
     for key, value in request.headers.items():
         if key.lower() in ("host", "content-length", "authorization"):
@@ -73,40 +117,25 @@ async def proxy_request(
     headers["Authorization"] = f"Bearer {real_key_text}"
 
     method = request.method
-    is_stream = False
-    try:
-        req_json = json.loads(body)
-        is_stream = req_json.get("stream", False)
-    except Exception:
-        pass
-
+    client = get_http_client()
     start_time = time.time()
-    client = httpx.AsyncClient(timeout=300.0)
 
-    try:
-        if is_stream and method.upper() == "POST":
-            return await _proxy_stream(
-                client, target_url, method, headers, body,
-                fake_key_id, real_key.id, provider, model,
-                path, request_preview, start_time,
-            )
-        else:
-            return await _proxy_non_stream(
-                client, target_url, method, headers, body,
-                fake_key_id, real_key.id, provider, model,
-                path, request_preview, start_time,
-            )
-    except Exception:
-        await client.aclose()
-        raise
+    req = client.build_request(method, target_url, headers=headers, content=body)
+    response = await client.send(req, stream=True)
+
+    if is_stream and method.upper() == "POST":
+        return await _proxy_stream(
+            response, fake_key_id, real_key.id, provider, model,
+            path, request_preview, start_time, is_chat,
+        )
+    return await _proxy_non_stream(
+        response, fake_key_id, real_key.id, provider, model,
+        path, request_preview, start_time, is_chat,
+    )
 
 
 async def _proxy_non_stream(
-    client: httpx.AsyncClient,
-    target_url: str,
-    method: str,
-    headers: dict,
-    body: bytes,
+    response: httpx.Response,
     fake_key_id: int,
     real_key_id: int,
     provider: str,
@@ -114,48 +143,39 @@ async def _proxy_non_stream(
     endpoint: str,
     request_preview: str,
     start_time: float,
-) -> JSONResponse:
-    response = await client.request(method, target_url, headers=headers, content=body)
-    resp_body = await response.aread()
-    latency_ms = int((time.time() - start_time) * 1000)
+    is_chat: bool,
+) -> StreamingResponse:
+    chunks: list[bytes] = []
 
-    tokens_input = 0
-    tokens_output = 0
-    try:
-        data = json.loads(resp_body)
-        tokens_input, tokens_output = parse_usage_from_response(data)
-    except Exception:
-        pass
-
-    # 只记录模型聊天请求
-    if "chat/completions" in endpoint:
-        async with AsyncSessionLocal() as log_db:
-            await record_request(
-                log_db, fake_key_id, real_key_id, provider, model, endpoint,
+    async def body_generator() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in response.aiter_bytes():
+                if is_chat:
+                    chunks.append(chunk)
+                yield chunk
+        finally:
+            latency_ms = int((time.time() - start_time) * 1000)
+            tokens_input, tokens_output = 0, 0
+            if is_chat:
+                body = b"".join(chunks)
+                data = _safe_json_loads(body)
+                tokens_input, tokens_output = parse_usage_from_response(data) if data else (0, 0)
+            _record_request_background(
+                fake_key_id, real_key_id, provider, model, endpoint,
                 response.status_code, latency_ms, tokens_input, tokens_output, request_preview,
             )
+            await response.aclose()
 
-    await client.aclose()
-
-    content = {}
-    if resp_body:
-        try:
-            content = json.loads(resp_body)
-        except Exception:
-            content = {"raw_response": resp_body.decode("utf-8", errors="ignore")}
-    return JSONResponse(
-        content=content,
+    return StreamingResponse(
+        body_generator(),
         status_code=response.status_code,
-        headers={k: v for k, v in response.headers.items() if k.lower() not in ("content-length", "transfer-encoding")},
+        media_type=response.headers.get("content-type", "application/json"),
+        headers=_response_headers(response),
     )
 
 
 async def _proxy_stream(
-    client: httpx.AsyncClient,
-    target_url: str,
-    method: str,
-    headers: dict,
-    body: bytes,
+    response: httpx.Response,
     fake_key_id: int,
     real_key_id: int,
     provider: str,
@@ -163,81 +183,69 @@ async def _proxy_stream(
     endpoint: str,
     request_preview: str,
     start_time: float,
+    is_chat: bool,
 ) -> StreamingResponse:
-    req = client.build_request(method, target_url, headers=headers, content=body)
-    response = await client.send(req)
+    chunks: list[bytes] = []
 
     async def event_generator() -> AsyncIterator[bytes]:
-        output_text = ""
-        usage_found = False
-        tokens_input = 0
-        tokens_output = 0
         try:
             async for chunk in response.aiter_bytes():
+                if is_chat:
+                    chunks.append(chunk)
                 yield chunk
-                # 尝试从 chunk 中解析 usage
-                if not usage_found:
-                    try:
-                        text = chunk.decode("utf-8")
-                        for line in text.split("\n"):
-                            if line.startswith("data: "):
-                                data_str = line[6:].strip()
-                                if data_str == "[DONE]":
-                                    continue
-                                try:
-                                    data = json.loads(data_str)
-                                    u = data.get("usage")
-                                    if u:
-                                        tokens_input = u.get("prompt_tokens", 0) or u.get("input_tokens", 0)
-                                        tokens_output = u.get("completion_tokens", 0) or u.get("output_tokens", 0)
-                                        usage_found = True
-                                    # 累加输出文本用于估算
-                                    for choice in data.get("choices", []):
-                                        delta = choice.get("delta", {})
-                                        content = delta.get("content", "")
-                                        if content:
-                                            output_text += content
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
         finally:
             latency_ms = int((time.time() - start_time) * 1000)
-            if not usage_found and output_text:
-                # 粗略估算: 1 token ≈ 4 字符 (中文) 或 1 token ≈ 4 字符 (英文)
-                # 简化处理：按字符数/4估算
-                tokens_output = max(1, len(output_text) // 4)
-
-            # 在独立 task 中写日志，避免在 anyio cancel scope / 已取消的上下文内执行 SQLAlchemy greenlet
-            async def _do_record():
-                if "chat/completions" not in endpoint:
-                    return
-                try:
-                    async with AsyncSessionLocal() as log_db:
-                        await record_request(
-                            log_db, fake_key_id, real_key_id, provider, model, endpoint,
-                            response.status_code, latency_ms, tokens_input, tokens_output, request_preview,
-                        )
-                except Exception:
-                    pass
-
-            try:
-                asyncio.get_event_loop().create_task(_do_record())
-            except Exception:
-                pass
-
-            try:
-                await response.aclose()
-            except BaseException:
-                pass
-            try:
-                await client.aclose()
-            except BaseException:
-                pass
+            tokens_input, tokens_output = 0, 0
+            if is_chat:
+                tokens_input, tokens_output = _extract_stream_usage(chunks)
+            _record_request_background(
+                fake_key_id, real_key_id, provider, model, endpoint,
+                response.status_code, latency_ms, tokens_input, tokens_output, request_preview,
+            )
+            await response.aclose()
 
     return StreamingResponse(
         event_generator(),
         status_code=response.status_code,
         media_type="text/event-stream",
-        headers={k: v for k, v in response.headers.items() if k.lower() not in ("content-length", "transfer-encoding")},
+        headers=_response_headers(response),
     )
+
+
+def _extract_stream_usage(chunks: list[bytes]) -> tuple[int, int]:
+    if not chunks:
+        return 0, 0
+
+    text = b"".join(chunks).decode("utf-8", errors="ignore")
+    tokens_input = 0
+    tokens_output = 0
+    usage_found = False
+    output_chars = 0
+
+    for line in text.split("\n"):
+        if not line.startswith("data: "):
+            continue
+        data_str = line[6:].strip()
+        if data_str == "[DONE]":
+            continue
+        data = _safe_json_loads(data_str)
+        if not data:
+            continue
+
+        u = data.get("usage")
+        if u:
+            tokens_input = u.get("prompt_tokens", 0) or u.get("input_tokens", 0)
+            tokens_output = u.get("completion_tokens", 0) or u.get("output_tokens", 0)
+            usage_found = True
+
+        if not usage_found:
+            for choice in data.get("choices", []):
+                delta = choice.get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    output_chars += len(content)
+
+    if not usage_found and output_chars:
+        tokens_output = max(1, output_chars // 4)
+
+    return int(tokens_input or 0), int(tokens_output or 0)

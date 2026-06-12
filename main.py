@@ -7,7 +7,9 @@ from starlette.responses import FileResponse
 
 from models import Base
 from routers import admin, proxy
+from utils.background import wait_background_tasks
 from utils.db import engine
+from utils.http_client import close_http_client
 
 app = FastAPI(title="AI Token Proxy", version="1.0.0")
 
@@ -37,3 +39,9 @@ async def admin_page():
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await wait_background_tasks(timeout=5.0)
+    await close_http_client()
