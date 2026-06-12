@@ -35,6 +35,7 @@
                     <button class="nav-btn" data-tab="keys">密钥管理</button>
                     <button class="nav-btn" data-tab="mappings">映射关系</button>
                     <button class="nav-btn" data-tab="logs">请求日志</button>
+                    <button class="nav-btn" data-tab="test">连接测试</button>
                     <button class="nav-btn" id="nav-users" style="display:none;" data-tab="users">用户管理</button>
                 </nav>
             </div>
@@ -108,7 +109,7 @@
                     </div>
                     <table>
                         <thead>
-                            <tr><th>ID</th><th>厂商</th><th>名称</th><th>启用</th><th>创建时间</th><th>操作</th></tr>
+                            <tr><th>ID</th><th>接口规范</th><th>Base URL</th><th>名称</th><th>启用</th><th>创建时间</th><th>操作</th></tr>
                         </thead>
                         <tbody id="real-keys-list"></tbody>
                     </table>
@@ -122,7 +123,7 @@
                 </div>
                 <table>
                     <thead>
-                        <tr><th>ID</th><th>假密钥</th><th>真密钥</th><th>厂商</th><th>优先级</th><th>操作</th></tr>
+                        <tr><th>ID</th><th>假密钥</th><th>真密钥</th><th>接口规范</th><th>优先级</th><th>操作</th></tr>
                     </thead>
                     <tbody id="mappings-list"></tbody>
                 </table>
@@ -135,18 +136,16 @@
                         <option value="">全部假密钥</option>
                     </select>
                     <select id="log-filter-provider">
-                        <option value="">全部厂商</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="deepseek">DeepSeek</option>
-                        <option value="siliconflow">SiliconFlow</option>
-                        <option value="moonshot">Moonshot</option>
+                        <option value="">全部接口规范</option>
+                        <option value="openai">OpenAI 风格</option>
+                        <option value="anthropic">Anthropic 风格</option>
                     </select>
                     <button class="btn" onclick="loadLogs()">查询</button>
                 </div>
                 <table>
                     <thead>
                         <tr>
-                            <th>ID</th><th>假密钥</th><th>厂商</th><th>模型</th><th>状态</th>
+                            <th>ID</th><th>假密钥</th><th>接口规范</th><th>模型</th><th>状态</th>
                             <th>耗时(ms)</th><th>Input</th><th>Output</th><th>时间</th><th>预览</th>
                         </tr>
                     </thead>
@@ -156,6 +155,34 @@
                     <button class="btn" onclick="changePage(-1)">上一页</button>
                     <span id="page-info">第 1 页</span>
                     <button class="btn" onclick="changePage(1)">下一页</button>
+                </div>
+            </section>
+
+            <!-- 连接测试 -->
+            <section id="tab-test" class="tab">
+                <h2>连接测试</h2>
+                <div class="test-form">
+                    <div class="form-group">
+                        <label>假密钥</label>
+                        <input id="test-key" placeholder="例如: fk-xxxxxxxxx" value="">
+                    </div>
+                    <div class="form-group">
+                        <label>请求 URL</label>
+                        <input id="test-url" placeholder="例如: http://localhost:8000/v1/chat/completions" value="">
+                    </div>
+                    <div class="form-group">
+                        <label>聊天内容</label>
+                        <textarea id="test-message" rows="4" placeholder="例如: 你好，请简单介绍一下自己"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>模型（可选）</label>
+                        <input id="test-model" placeholder="例如: gpt-4o-mini" value="gpt-4o-mini">
+                    </div>
+                    <button class="btn btn-primary" onclick="sendTestRequest()">发送测试请求</button>
+                </div>
+                <div class="test-result" id="test-result" style="display:none;">
+                    <h3>返回结果</h3>
+                    <pre id="test-result-body"></pre>
                 </div>
             </section>
 

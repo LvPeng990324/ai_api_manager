@@ -2,7 +2,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.key_service import get_fake_key_by_key, get_real_keys_for_fake
-from services.proxy_service import KNOWN_PROVIDERS, proxy_request
+from services.proxy_service import proxy_request
 from utils.db import AsyncSessionLocal
 
 router = APIRouter()
@@ -20,24 +20,6 @@ def extract_bearer_token(authorization: str | None) -> str:
     raise HTTPException(status_code=401, detail="Invalid Authorization header")
 
 
-async def _infer_provider(db: AsyncSession, fake_key_id: int) -> str:
-    """从假密钥绑定的真密钥中推断出默认厂商（取优先级最高的第一个）"""
-    from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
-    from models import KeyMapping
-    result = await db.execute(
-        select(KeyMapping)
-        .options(selectinload(KeyMapping.real_key))
-        .where(KeyMapping.fake_key_id == fake_key_id)
-        .order_by(KeyMapping.priority, KeyMapping.id)
-    )
-    mappings = result.scalars().all()
-    for m in mappings:
-        if m.real_key and m.real_key.enabled:
-            return m.real_key.provider
-    raise HTTPException(status_code=400, detail="No real key mapped for this fake key")
-
-
 @router.api_route("/v1/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy(
     full_path: str,
@@ -45,9 +27,9 @@ async def proxy(
     authorization: str | None = Header(None),
 ):
     """
-    智能路由：
-    - /v1/deepseek/chat/completions  → provider=deepseek, path=chat/completions
-    - /v1/chat/completions           → 从假密钥推断 provider, path=chat/completions
+    透明代理：
+    - 下游使用 http://localhost:8000/v1 作为 base_url，路径保持 OpenAI 规范
+    - 根据假密钥找到映射的真密钥，把请求转发到真密钥的 base_url + 原路径（去掉 /v1 重叠前缀）
     """
     fake_key_str = extract_bearer_token(authorization)
 
@@ -56,24 +38,13 @@ async def proxy(
         if not fake_key or not fake_key.enabled:
             raise HTTPException(status_code=401, detail="Invalid or disabled fake key")
 
-        # 解析 provider 和 path
-        parts = full_path.split("/", 1)
-        first_segment = parts[0]
-        if first_segment in KNOWN_PROVIDERS:
-            provider = first_segment
-            path = parts[1] if len(parts) > 1 else ""
-        else:
-            # 路径第一段不是已知厂商，从假密钥推断
-            provider = await _infer_provider(db, fake_key.id)
-            path = full_path
-
-        real_keys = await get_real_keys_for_fake(db, fake_key.id, provider)
+        real_keys = await get_real_keys_for_fake(db, fake_key.id)
         if not real_keys:
-            raise HTTPException(status_code=400, detail=f"No real key mapped for provider: {provider}")
+            raise HTTPException(status_code=400, detail="No real key mapped for this fake key")
 
         # 取第一个可用的真密钥（已按优先级+随机排序）
         real_key = real_keys[0]
 
     return await proxy_request(
-        provider, path, request, real_key, fake_key.id
+        request, real_key, fake_key.id, full_path
     )

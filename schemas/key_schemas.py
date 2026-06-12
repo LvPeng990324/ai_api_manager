@@ -34,7 +34,8 @@ class FakeKeyOut(BaseModel):
 # ---------- RealKey ----------
 
 class RealKeyCreate(BaseModel):
-    provider: str
+    provider: str  # 接口规范：openai / anthropic
+    base_url: str
     key: str
     name: str = ""
     enabled: bool = True
@@ -42,6 +43,7 @@ class RealKeyCreate(BaseModel):
 
 class RealKeyUpdate(BaseModel):
     provider: Optional[str] = None
+    base_url: Optional[str] = None
     key: Optional[str] = None
     name: Optional[str] = None
     enabled: Optional[bool] = None
@@ -50,6 +52,7 @@ class RealKeyUpdate(BaseModel):
 class RealKeyOut(BaseModel):
     id: int
     provider: str
+    base_url: str
     name: str
     enabled: bool
     created_at: datetime

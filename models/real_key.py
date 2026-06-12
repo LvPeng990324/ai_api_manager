@@ -10,7 +10,8 @@ class RealKey(Base):
     __tablename__ = "real_keys"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    provider: Mapped[str] = mapped_column(String, index=True)
+    provider: Mapped[str] = mapped_column(String, index=True)  # 接口规范：openai / anthropic
+    base_url: Mapped[str] = mapped_column(String, default="")  # 上游接入地址
     key: Mapped[str] = mapped_column(String)  # 加密存储
     name: Mapped[str] = mapped_column(String, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -12,25 +12,12 @@ from services.key_service import get_real_key_decrypted
 from services.stats_service import record_request
 from utils.db import AsyncSessionLocal
 
-# 厂商配置
-PROVIDERS = {
-    "openai": "https://api.openai.com/v1",
-    "deepseek": "https://api.deepseek.com/v1",
-    "siliconflow": "https://api.siliconflow.cn/v1",
-    "moonshot": "https://api.moonshot.cn/v1",
-    "custom": None,  # 通过配置传入
-}
-
-KNOWN_PROVIDERS = set(PROVIDERS.keys())
-
-
-def get_provider_base_url(provider: str, custom_url: Optional[str] = None) -> str:
-    if provider == "custom" and custom_url:
-        return custom_url.rstrip("/")
-    base = PROVIDERS.get(provider)
-    if not base:
-        raise ValueError(f"Unknown provider: {provider}")
-    return base
+def _build_target_url(real_key: RealKey, full_path: str) -> str:
+    """根据真密钥 base_url 和下游请求路径构造上游目标 URL。"""
+    base_url = real_key.base_url.strip().rstrip("/")
+    if not base_url:
+        raise ValueError("Real key base_url is empty")
+    return f"{base_url}/{full_path.lstrip('/')}"
 
 
 async def extract_request_preview(body: bytes) -> str:
@@ -60,15 +47,15 @@ def parse_usage_from_response(data: dict) -> tuple[int, int]:
 
 
 async def proxy_request(
-    provider: str,
-    path: str,
     request: Request,
     real_key: RealKey,
     fake_key_id: int,
+    full_path: str,
 ) -> StreamingResponse | JSONResponse:
     """核心代理转发逻辑"""
-    base_url = get_provider_base_url(provider)
-    target_url = f"{base_url}/{path}"
+    target_url = _build_target_url(real_key, full_path)
+    provider = real_key.provider  # 仅用于日志/统计
+    path = full_path
 
     real_key_text = get_real_key_decrypted(real_key)
 
@@ -150,8 +137,14 @@ async def _proxy_non_stream(
 
     await client.aclose()
 
+    content = {}
+    if resp_body:
+        try:
+            content = json.loads(resp_body)
+        except Exception:
+            content = {"raw_response": resp_body.decode("utf-8", errors="ignore")}
     return JSONResponse(
-        content=json.loads(resp_body) if resp_body else {},
+        content=content,
         status_code=response.status_code,
         headers={k: v for k, v in response.headers.items() if k.lower() not in ("content-length", "transfer-encoding")},
     )

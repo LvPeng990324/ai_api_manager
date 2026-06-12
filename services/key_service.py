@@ -66,9 +66,14 @@ async def get_real_key_by_id(db: AsyncSession, key_id: int) -> Optional[RealKey]
     return result.scalar_one_or_none()
 
 
+def _normalize_base_url(url: str) -> str:
+    return url.strip().rstrip("/")
+
+
 async def create_real_key(db: AsyncSession, data: RealKeyCreate) -> RealKey:
     rk = RealKey(
         provider=data.provider,
+        base_url=_normalize_base_url(data.base_url),
         key=encrypt(data.key),
         name=data.name,
         enabled=data.enabled,
@@ -82,6 +87,8 @@ async def create_real_key(db: AsyncSession, data: RealKeyCreate) -> RealKey:
 async def update_real_key(db: AsyncSession, rk: RealKey, data: RealKeyUpdate) -> RealKey:
     if data.provider is not None:
         rk.provider = data.provider
+    if data.base_url is not None:
+        rk.base_url = _normalize_base_url(data.base_url)
     if data.key is not None:
         rk.key = encrypt(data.key)
     if data.name is not None:
@@ -141,8 +148,8 @@ async def get_mapping_by_id(db: AsyncSession, mapping_id: int) -> Optional[KeyMa
     return result.scalar_one_or_none()
 
 
-async def get_real_keys_for_fake(db: AsyncSession, fake_key_id: int, provider: str) -> List[RealKey]:
-    """获取某个假密钥在指定厂商下映射的所有真密钥（按优先级排序，同优先级随机打乱）"""
+async def get_real_keys_for_fake(db: AsyncSession, fake_key_id: int) -> List[RealKey]:
+    """获取某个假密钥映射的所有启用真密钥（按优先级排序，同优先级随机打乱）"""
     result = await db.execute(
         select(KeyMapping)
         .options(selectinload(KeyMapping.real_key))
@@ -155,7 +162,7 @@ async def get_real_keys_for_fake(db: AsyncSession, fake_key_id: int, provider: s
     priority_groups = {}
     for m in mappings:
         rk = m.real_key
-        if rk and rk.enabled and rk.provider == provider:
+        if rk and rk.enabled:
             priority_groups.setdefault(m.priority, []).append(rk)
 
     if not priority_groups:

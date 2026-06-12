@@ -219,12 +219,13 @@ async function loadKeys() {
     document.getElementById('real-keys-list').innerHTML = realKeys.map(k => `
         <tr>
             <td>${k.id}</td>
-            <td>${k.provider}</td>
+            <td>${k.provider === 'anthropic' ? 'Anthropic 风格' : 'OpenAI 风格'}</td>
+            <td><span class="code" title="${k.base_url}">${k.base_url || '-'}</span></td>
             <td>${k.name || '-'}</td>
             <td>${k.enabled ? '✅' : '❌'}</td>
             <td>${new Date(k.created_at).toLocaleString()}</td>
             <td>
-                <button class="btn" onclick="editRealKey(${k.id}, '${k.provider}', '${(k.name||'').replace(/'/g,'\\\'')}', ${k.enabled})">编辑</button>
+                <button class="btn" onclick="editRealKey(${k.id}, '${k.provider}', '${(k.base_url||'').replace(/'/g,'\\\'')}', '${(k.name||'').replace(/'/g,'\\\'')}', ${k.enabled})">编辑</button>
                 <button class="btn btn-danger" onclick="deleteRealKey(${k.id})">删除</button>
             </td>
         </tr>
@@ -251,7 +252,7 @@ async function loadMappings() {
             <td>${m.id}</td>
             <td>${m.fake_key?.name || m.fake_key?.key || m.fake_key_id}</td>
             <td>${m.real_key?.name || m.real_key_id}</td>
-            <td>${m.real_key?.provider || '-'}</td>
+            <td>${m.real_key ? (m.real_key.provider === 'anthropic' ? 'Anthropic 风格' : 'OpenAI 风格') : '-'}</td>
             <td>${m.priority}</td>
             <td>
                 <button class="btn btn-danger" onclick="deleteMapping(${m.id})">删除</button>
@@ -356,15 +357,14 @@ function showModal(type) {
     } else if (type === 'real') {
         title.textContent = '新建真密钥';
         body.innerHTML = `
-            <div class="form-group"><label>厂商</label>
+            <div class="form-group"><label>接口规范</label>
                 <select id="m-real-provider">
-                    <option value="openai">OpenAI</option>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="siliconflow">SiliconFlow</option>
-                    <option value="moonshot">Moonshot</option>
+                    <option value="openai">OpenAI 风格</option>
+                    <option value="anthropic">Anthropic 风格</option>
                 </select>
             </div>
-            <div class="form-group"><label>密钥</label><input id="m-real-key" placeholder="输入厂商提供的真实 API Key"></div>
+            <div class="form-group"><label>Base URL</label><input id="m-real-base-url" placeholder="例如: https://api.openai.com/v1"></div>
+            <div class="form-group"><label>密钥</label><input id="m-real-key" placeholder="输入上游提供的真实 API Key"></div>
             <div class="form-group"><label>名称</label><input id="m-real-name" placeholder="例如: OpenAI-主账号"></div>
             <div class="form-group"><label>启用</label><select id="m-real-enabled"><option value="1">是</option><option value="0">否</option></select></div>
         `;
@@ -382,7 +382,7 @@ function showModal(type) {
                 </div>
                 <div class="form-group"><label>真密钥</label>
                     <select id="m-map-real">
-                        ${realKeys.map(k => `<option value="${k.id}">${k.name || k.provider} - ${k.provider}</option>`).join('')}
+                        ${realKeys.map(k => `<option value="${k.id}">${k.name || k.base_url} - ${k.provider === 'anthropic' ? 'Anthropic 风格' : 'OpenAI 风格'}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group"><label>优先级</label><input id="m-map-priority" type="number" value="0"></div>
@@ -415,20 +415,19 @@ function editFakeKey(id, name, enabled) {
     modal.classList.add('active');
 }
 
-function editRealKey(id, provider, name, enabled) {
+function editRealKey(id, provider, baseUrl, name, enabled) {
     currentModalType = 'edit-real';
     currentModalType.id = id;
     const modal = document.getElementById('modal');
     document.getElementById('modal-title').textContent = '编辑真密钥';
     document.getElementById('modal-body').innerHTML = `
-        <div class="form-group"><label>厂商</label>
+        <div class="form-group"><label>接口规范</label>
             <select id="m-real-provider">
-                <option value="openai" ${provider==='openai'?'selected':''}>OpenAI</option>
-                <option value="deepseek" ${provider==='deepseek'?'selected':''}>DeepSeek</option>
-                <option value="siliconflow" ${provider==='siliconflow'?'selected':''}>SiliconFlow</option>
-                <option value="moonshot" ${provider==='moonshot'?'selected':''}>Moonshot</option>
+                <option value="openai" ${provider==='openai'?'selected':''}>OpenAI 风格</option>
+                <option value="anthropic" ${provider==='anthropic'?'selected':''}>Anthropic 风格</option>
             </select>
         </div>
+        <div class="form-group"><label>Base URL</label><input id="m-real-base-url" value="${baseUrl}" placeholder="例如: https://api.openai.com/v1"></div>
         <div class="form-group"><label>密钥 (留空则不变)</label><input id="m-real-key" placeholder="留空表示不修改"></div>
         <div class="form-group"><label>名称</label><input id="m-real-name" value="${name}"></div>
         <div class="form-group"><label>启用</label><select id="m-real-enabled"><option value="1" ${enabled?'selected':''}>是</option><option value="0" ${!enabled?'selected':''}>否</option></select></div>
@@ -465,12 +464,13 @@ async function submitModal() {
         });
     } else if (currentModalType === 'real') {
         const provider = document.getElementById('m-real-provider').value;
+        const base_url = document.getElementById('m-real-base-url').value.trim();
         const key = document.getElementById('m-real-key').value;
         const name = document.getElementById('m-real-name').value;
         const enabled = document.getElementById('m-real-enabled').value === '1';
         await apiFetch(`${API_BASE}/real-keys`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider, key, name, enabled }),
+            body: JSON.stringify({ provider, base_url, key, name, enabled }),
         });
     } else if (currentModalType === 'mapping') {
         const fake_key_id = parseInt(document.getElementById('m-map-fake').value);
@@ -496,10 +496,11 @@ async function submitModal() {
         });
     } else if (currentModalType === 'edit-real') {
         const provider = document.getElementById('m-real-provider').value;
+        const base_url = document.getElementById('m-real-base-url').value.trim();
         const key = document.getElementById('m-real-key').value;
         const name = document.getElementById('m-real-name').value;
         const enabled = document.getElementById('m-real-enabled').value === '1';
-        const body = { provider, name, enabled };
+        const body = { provider, base_url, name, enabled };
         if (key) body.key = key;
         await apiFetch(`${API_BASE}/real-keys/${currentModalType.id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -533,7 +534,7 @@ function showLogDetail(log) {
         <div class="detail-row"><span class="detail-label">ID</span><span class="detail-value">${log.id}</span></div>
         <div class="detail-row"><span class="detail-label">假密钥 ID</span><span class="detail-value">${log.fake_key_id}</span></div>
         <div class="detail-row"><span class="detail-label">真密钥 ID</span><span class="detail-value">${log.real_key_id || '-'}</span></div>
-        <div class="detail-row"><span class="detail-label">厂商</span><span class="detail-value">${log.provider}</span></div>
+        <div class="detail-row"><span class="detail-label">接口规范</span><span class="detail-value">${log.provider === 'anthropic' ? 'Anthropic 风格' : 'OpenAI 风格'}</span></div>
         <div class="detail-row"><span class="detail-label">模型</span><span class="detail-value">${log.model || '-'}</span></div>
         <div class="detail-row"><span class="detail-label">接口</span><span class="detail-value">${log.endpoint || '-'}</span></div>
         <div class="detail-row"><span class="detail-label">状态码</span><span class="detail-value">${log.status_code}</span></div>
@@ -557,6 +558,65 @@ function showLogDetail(log) {
 
 function closeDetailModal() {
     document.getElementById('detail-modal').classList.remove('active');
+}
+
+// ========== Connection Test ==========
+async function sendTestRequest() {
+    const key = document.getElementById('test-key').value.trim();
+    const url = document.getElementById('test-url').value.trim();
+    const message = document.getElementById('test-message').value.trim();
+    const model = document.getElementById('test-model').value.trim() || 'gpt-4o-mini';
+
+    const resultBox = document.getElementById('test-result');
+    const resultBody = document.getElementById('test-result-body');
+
+    if (!key) {
+        resultBody.textContent = '请填写假密钥';
+        resultBox.style.display = 'block';
+        return;
+    }
+    if (!url) {
+        resultBody.textContent = '请填写请求 URL';
+        resultBox.style.display = 'block';
+        return;
+    }
+    if (!message) {
+        resultBody.textContent = '请填写聊天内容';
+        resultBox.style.display = 'block';
+        return;
+    }
+
+    resultBody.textContent = '请求发送中...';
+    resultBox.style.display = 'block';
+
+    const body = {
+        model: model,
+        messages: [{ role: 'user', content: message }],
+        stream: false,
+    };
+
+    const startTime = Date.now();
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${key}`,
+            },
+            body: JSON.stringify(body),
+        });
+        const latency = Date.now() - startTime;
+        let text = '';
+        try {
+            const data = await res.json();
+            text = JSON.stringify(data, null, 2);
+        } catch (e) {
+            text = await res.text();
+        }
+        resultBody.textContent = `HTTP ${res.status} (${latency}ms)\n\n${text}`;
+    } catch (err) {
+        resultBody.textContent = `请求失败: ${err.message}`;
+    }
 }
 
 // 初始加载

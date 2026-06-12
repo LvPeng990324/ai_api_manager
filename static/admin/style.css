@@ -203,8 +203,46 @@ tr:hover { background: #f8fafc; }
     color: #555;
     font-weight: 500;
 }
-.form-group input, .form-group select {
+.form-group input, .form-group select, .form-group textarea {
     width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+}
+
+.test-form {
+    max-width: 640px;
+    margin-bottom: 24px;
+}
+
+.test-result {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.test-result h3 {
+    font-size: 15px;
+    margin-bottom: 10px;
+    color: #1a1a2e;
+}
+
+#test-result-body {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 480px;
+    overflow: auto;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 0;
 }
 
 .code {
